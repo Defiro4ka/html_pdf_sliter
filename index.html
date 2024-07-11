@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Splitter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f2f2f2;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            max-width: 600px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        input[type="file"], input[type="number"], button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        button {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #file-info {
+            margin-top: 20px;
+            background: #f9f9f9;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow-y: auto;
+            max-height: 200px;
+        }
+        #copy-info {
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1>PDF Splitter</h1>
+        <input type="file" id="upload-pdf" accept="application/pdf" />
+        <div>
+            <label for="num-parts">Number of parts:</label>
+            <input type="number" id="num-parts" min="1" value="1" />
+        </div>
+        <div class="buttons">
+            <button id="split-pdf">Split PDF</button>
+            <button id="download-all">Download All</button>
+            <button id="download-zip">Download as ZIP</button>
+        </div>
+        <div id="file-info"></div>
+        <div id="copy-info">
+            <button id="copy-file-info">Copy File Info</button>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.6.0/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.js"></script>
+    <script>
+        const uploadPdf = document.getElementById('upload-pdf');
+        const splitPdfButton = document.getElementById('split-pdf');
+        const downloadAllButton = document.getElementById('download-all');
+        const downloadZipButton = document.getElementById('download-zip');
+        const numPartsInput = document.getElementById('num-parts');
+        const fileInfoDiv = document.getElementById('file-info');
+        const copyFileInfoButton = document.getElementById('copy-file-info');
+
+        let pdfDoc = null;
+        let pdfFile = null;
+        let splitParts = [];
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
+
+        uploadPdf.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (file && file.type === 'application/pdf') {
+                const arrayBuffer = await file.arrayBuffer();
+                pdfFile = arrayBuffer;
+                pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+            }
+        });
+
+        splitPdfButton.addEventListener('click', async () => {
+            if (!pdfDoc) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'No PDF File',
+                    text: 'Please upload a PDF file before splitting.'
+                });
+                return;
+            }
+
+            if (pdfDoc) {
+                const numPages = pdfDoc.getPageCount();
+                const numParts = parseInt(numPartsInput.value);
+                const pagesPerPart = Math.floor(numPages / numParts);
+                const remainder = numPages % numParts;
+                splitParts = [];
+
+                let start = 0;
+                for (let i = 0; i < numParts; i++) {
+                    let end = start + pagesPerPart + (i < remainder ? 1 : 0);
+
+                    const newPdf = await PDFLib.PDFDocument.create();
+                    const pages = await newPdf.copyPages(pdfDoc, Array.from({ length: end - start }, (_, j) => start + j));
+                    pages.forEach(page => newPdf.addPage(page));
+                    const pdfBytes = await newPdf.save();
+                    splitParts.push({ bytes: pdfBytes, filename: `file_${i + 1}.pdf`, numPages: end - start });
+
+                    start = end;
+                }
+
+                displayFileInfo();
+                Swal.fire({
+                    icon: 'success',
+                    title: 'PDF Split Successful',
+                    text: 'PDF split into ' + numParts + ' parts.'
+                });
+            }
+        });
+
+        function displayFileInfo() {
+            fileInfoDiv.innerHTML = '';
+            splitParts.forEach((part, index) => {
+                const blob = new Blob([part.bytes], { type: 'application/pdf' });
+                const fileSize = blob.size / (1024 * 1024); // Size in MB
+                const info = document.createElement('div');
+                info.textContent = `File: ${part.filename}, Size: ${fileSize.toFixed(2)} MB, Pages: ${part.numPages}`;
+                fileInfoDiv.appendChild(info);
+            });
+        }
+
+        copyFileInfoButton.addEventListener('click', () => {
+            const fileInfoText = splitParts.map(part => {
+                const blob = new Blob([part.bytes], { type: 'application/pdf' });
+                const fileSize = blob.size / (1024 * 1024); // Size in MB
+                return `File: ${part.filename}, Size: ${fileSize.toFixed(2)} MB, Pages: ${part.numPages}`;
+            }).join('\n');
+
+            navigator.clipboard.writeText(fileInfoText).then(() => {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Copied!',
+                    text: 'File information copied to clipboard.'
+                });
+            }, () => {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Copy Failed',
+                    text: 'Failed to copy file information to clipboard.'
+                });
+            });
+        });
+
+        downloadAllButton.addEventListener('click', () => {
+            splitParts.forEach(part => {
+                download(part.bytes, part.filename, 'application/pdf');
+            });
+        });
+
+        downloadZipButton.addEventListener('click', async () => {
+            if (splitParts.length === 0) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'No PDF Parts',
+                    text: 'Please split the PDF before downloading as ZIP.'
+                });
+                return;
+            }
+
+            Swal.fire({
+                title: 'Creating ZIP archive...',
+                html: 'Please wait while the ZIP archive is being created.',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
+            const zip = new JSZip();
+            splitParts.forEach(part => {
+                zip.file(part.filename, part.bytes);
+            });
+
+            const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+                Swal.update({
+                    html: `Progress: ${metadata.percent.toFixed(2)}%`
+                });
+            });
+
+            saveAs(content, 'split_pdf_parts.zip');
+
+            Swal.fire({
+                icon: 'success',
+                title: 'ZIP Archive Created',
+                text: 'The ZIP archive has been created and is ready for download.'
+            });
+        });
+
+        function download(data, filename, type) {
+            const blob = new Blob([data], { type: type });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
